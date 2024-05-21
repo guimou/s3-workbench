@@ -1,0 +1,11 @@
+{
+  "app_title": "S3 Browser",
+  "app_header": {
+    "powered_by": "Powered by",
+    "help": {
+      "header": "Information",
+      "body": "Simple S3 Browser workbench.",
+      "footer": "Source code available at https://github.com/guimou/s3-workbench"
+    }
+  }
+}
