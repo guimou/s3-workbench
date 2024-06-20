@@ -127,3 +127,14 @@ body,
 .upload-bars {
   margin-top: 10px;
 }
+
+.form-s3-settings {
+  width: 25%;
+}
+
+.form-s3-settings-long {
+  width: 50%;
+}
+.form-s3-submit {
+  width: 250px;
+}
