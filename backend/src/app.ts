@@ -6,8 +6,11 @@ import fastifyAutoload from '@fastify/autoload';
 import fastifySensible from '@fastify/sensible';
 import fastifyWebsocket from '@fastify/websocket';
 import fastifyAccepts from '@fastify/accepts';
+import { FastifySSEPlugin } from 'fastify-sse-v2';
 import { FastifyInstance } from 'fastify/types/instance';
+require('dotenv').config();
 
+// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
 export const initializeApp = async (fastify: FastifyInstance, opts: any): Promise<void> => {
   if (!fs.existsSync(LOG_DIR)) {
     fastify.log.info(`${LOG_DIR} does not exist. Creating`);
@@ -18,9 +21,15 @@ export const initializeApp = async (fastify: FastifyInstance, opts: any): Promis
 
   fastify.register(fastifyWebsocket);
 
+  fastify.register(FastifySSEPlugin);
+
   fastify.register(fastifyStatic, {
-    root: path.join(__dirname, '../../frontend/public'),
+    root: path.join(__dirname, '../../frontend/dist'),
     wildcard: false,
+  });
+
+  fastify.setNotFoundHandler((req, res) => {
+    res.sendFile('index.html');
   });
 
   fastify.register(fastifyAutoload, {

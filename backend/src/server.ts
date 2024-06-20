@@ -1,10 +1,12 @@
 import { fastify } from 'fastify';
+import fastifyMultipart from '@fastify/multipart';
 import pino from 'pino';
 import { APP_ENV, PORT, IP, LOG_LEVEL } from './utils/constants';
 import { initializeApp } from './app';
 import { AddressInfo } from 'net';
 import https from 'https';
 import fs from 'fs';
+import cors from '@fastify/cors';
 
 const transport =
   APP_ENV === 'development'
@@ -29,7 +31,17 @@ const app = fastify({
     transport,
   ),
   pluginTimeout: 10000,
+  maxParamLength: 1000,
 });
+
+app.register(cors, {
+  origin: ['*'],
+  methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Content-Disposition'],
+});
+
+app.register(fastifyMultipart);
 
 app.register(initializeApp);
 
@@ -53,7 +65,7 @@ app.listen({ port: PORT, host: IP }, (err) => {
     .map(getCABundle)
     .filter((ca) => ca !== undefined);
 
-  https.globalAgent.options.ca = caPaths;
+  https.globalAgent.options.ca = caPaths as Buffer[];
 
   const address: AddressInfo = app.server.address() as AddressInfo;
   console.log('Fastify Connected...');

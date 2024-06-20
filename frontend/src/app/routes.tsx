@@ -2,6 +2,8 @@ import { NotFound } from '@app/components/NotFound/NotFound';
 import { useDocumentTitle } from '@app/utils/useDocumentTitle';
 import * as React from 'react';
 import { Redirect, Route, RouteComponentProps, Switch, useLocation } from 'react-router-dom';
+import { Buckets } from './components/Buckets/Buckets';
+import ObjectBrowser from './components/ObjectBrowser/ObjectBrowser';
 
 
 let routeFocusTimer: number;
@@ -28,11 +30,29 @@ export type AppRouteConfig = IAppRoute | IAppRouteGroup;
 
 const routes: AppRouteConfig[] = [
   {
-    component: NotFound,
+    component: () => <Redirect to="/buckets" />,
     exact: true,
-    label: 'Home',
-    path: '/Chat',
-    title: 'Not Found',
+    path: '/',
+    title: 'Redirect',
+  },
+  {
+    component: ObjectBrowser,
+    exact: true,
+    label: 'Object Browser',
+    path: '/objects/:bucketName/:prefix?',
+    title: 'Object Browser',
+  },
+  {
+    component: Buckets,
+    exact: true,
+    label: 'Bucket Management',
+    path: '/buckets',
+    title: 'Bucket Management',
+  },
+  {
+    component: () => <Redirect to="/buckets" />,
+    path: '*',
+    title: 'Redirect',
   },
 ];
 
