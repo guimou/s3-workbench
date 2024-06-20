@@ -1,27 +1,15 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import {
-  CreateBucketCommand,
-  DeleteBucketCommand,
-  ListBucketsCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
+import { CreateBucketCommand, DeleteBucketCommand, ListBucketsCommand } from '@aws-sdk/client-s3';
 
-const client = new S3Client({
-  region: process.env.AWS_DEFAULT_REGION,
-  endpoint: process.env.AWS_S3_ENDPOINT,
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+const config = require('../../../utils/config');
 
 export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { s3Client } = config.getConfig();
     const command = new ListBucketsCommand({});
 
     try {
-      const { Owner, Buckets } = await client.send(command);
+      const { Owner, Buckets } = await s3Client.send(command);
       reply.send({
         owner: Owner,
         buckets: Buckets,
@@ -33,13 +21,14 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   });
 
   fastify.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { s3Client } = config.getConfig();
     const { bucketName } = req.body as any;
     const createBucketCommand = new CreateBucketCommand({
       Bucket: bucketName,
     });
 
     try {
-      const data = await client.send(createBucketCommand);
+      const data = await s3Client.send(createBucketCommand);
       reply.send({ message: 'Bucket created successfully', data });
     } catch (error) {
       console.error('Error creating bucket', error);
@@ -48,6 +37,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   });
 
   fastify.delete('/:bucketName', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { s3Client } = config.getConfig();
     const { bucketName } = req.params as any;
 
     const deleteBucketCommand = new DeleteBucketCommand({
@@ -55,7 +45,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
     });
 
     try {
-      await client.send(deleteBucketCommand);
+      await s3Client.send(deleteBucketCommand);
       reply.send({ message: 'Bucket deleted successfully' });
     } catch (error) {
       console.error('Error deleting bucket', error);

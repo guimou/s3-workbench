@@ -453,4 +453,4 @@ const Buckets: React.FunctionComponent = () => {
     )
 };
 
-export { Buckets };
+export default  Buckets;

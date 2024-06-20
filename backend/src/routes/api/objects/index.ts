@@ -1,23 +1,9 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { NodeJsClient } from '@smithy/types';
-import {
-  ListObjectsV2Command,
-  DeleteObjectCommand,
-  S3Client,
-  GetObjectCommand,
-} from '@aws-sdk/client-s3';
+import { ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'stream';
 
-const s3Client = new S3Client({
-  region: process.env.AWS_DEFAULT_REGION,
-  endpoint: process.env.AWS_S3_ENDPOINT,
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-}) as NodeJsClient<S3Client>;
+const config = require('../../../utils/config');
 
 const createRef = (initialValue: any) => {
   return {
@@ -30,6 +16,7 @@ const abortUploadController = createRef(null);
 export default async (fastify: FastifyInstance): Promise<void> => {
   // Get all first-level objects in a bucket (delimiter is /)
   fastify.get('/:bucketName', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { s3Client } = config.getConfig();
     const { bucketName } = req.params as any;
     const command = new ListObjectsV2Command({
       Bucket: bucketName,
@@ -41,6 +28,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
 
   fastify.get('/:bucketName/:prefix', async (req: FastifyRequest, reply: FastifyReply) => {
     // Get all first-level objects in a bucket under a specific prefix
+    const { s3Client } = config.getConfig();
     const { bucketName, prefix } = req.params as any;
     let decoded_prefix = '';
     if (prefix !== undefined) {
@@ -57,6 +45,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
 
   // Get an object to view it in the client
   fastify.get('/view/:bucketName/:encodedKey', async (req: FastifyRequest, reply: FastifyReply) => {
+    const { s3Client } = config.getConfig();
     const { bucketName, encodedKey: encodedKey } = req.params as any;
     const key = atob(encodedKey);
 
@@ -79,6 +68,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.get(
     '/download/:bucketName/:encodedKey',
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const { s3Client } = config.getConfig();
       const { bucketName, encodedKey } = req.params as any;
       const key = atob(encodedKey);
       const fileName = key.split('/').pop();
@@ -117,6 +107,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.delete(
     '/:bucketName/:encodedObjectName',
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const { s3Client } = config.getConfig();
       const { bucketName, encodedObjectName } = req.params as any;
       const objectName = atob(encodedObjectName);
       const command = new DeleteObjectCommand({
@@ -185,6 +176,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.post(
     '/upload/:bucketName/:encodedKey',
     async (req: FastifyRequest, reply: FastifyReply) => {
+      const { s3Client } = config.getConfig();
       const { bucketName, encodedKey } = req.params as any;
       const key = atob(encodedKey);
 

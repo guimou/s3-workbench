@@ -2,8 +2,9 @@ import { NotFound } from '@app/components/NotFound/NotFound';
 import { useDocumentTitle } from '@app/utils/useDocumentTitle';
 import * as React from 'react';
 import { Redirect, Route, RouteComponentProps, Switch, useLocation } from 'react-router-dom';
-import { Buckets } from './components/Buckets/Buckets';
+import Buckets from './components/Buckets/Buckets';
 import ObjectBrowser from './components/ObjectBrowser/ObjectBrowser';
+import Settings from './components/Settings/Settings';
 
 
 let routeFocusTimer: number;
@@ -48,6 +49,13 @@ const routes: AppRouteConfig[] = [
     label: 'Bucket Management',
     path: '/buckets',
     title: 'Bucket Management',
+  },
+  {
+    component: Settings,
+    exact: true,
+    label: 'Settings',
+    path: '/settings',
+    title: 'Settings',
   },
   {
     component: () => <Redirect to="/buckets" />,
