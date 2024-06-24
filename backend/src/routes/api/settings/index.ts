@@ -18,7 +18,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
     const { accessKeyId, secretAccessKey, region, endpoint } = req.body as any;
     try {
-      config.setConfig(accessKeyId, secretAccessKey, region, endpoint);
+      config.updateConfig(accessKeyId, secretAccessKey, region, endpoint);
       reply.send({ message: 'Settings updated successfully' });
     } catch (error) {
       console.error('Error updating settings', error);

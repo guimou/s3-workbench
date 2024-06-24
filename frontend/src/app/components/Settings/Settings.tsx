@@ -3,7 +3,7 @@ import axios from 'axios';
 import * as React from 'react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
 import Emitter from '../../utils/emitter';
-import { Page, PageSection, Text, TextContent, TextVariants, Form, FormGroup, Button, TextInput, TextInputGroup, TextInputGroupMain, TextInputGroupUtilities } from '@patternfly/react-core';
+import { Page, PageSection, Text, TextContent, TextVariants, Form, FormGroup, Button, TextInput, TextInputGroup, TextInputGroupMain, TextInputGroupUtilities, Flex, FlexItem } from '@patternfly/react-core';
 import { EyeIcon } from '@patternfly/react-icons';
 
 interface SettingsProps { }
@@ -28,6 +28,7 @@ const Settings: React.FunctionComponent<SettingsProps> = () => {
     const params = useParams();
 
     const [s3Settings, setS3Settings] = React.useState<S3Settings>(new S3Settings('', '', '', ''));
+    const [settingsChanged, setSettingsChanged] = React.useState<boolean>(false);
 
     const [showSecretKey, setShowSecretKey] = React.useState<boolean>(false);
 
@@ -36,12 +37,34 @@ const Settings: React.FunctionComponent<SettingsProps> = () => {
             ...prevState,
             [field]: value,
         }));
+        setSettingsChanged(true);
     };
 
-    const handleSubmit = (event) => {
+    const handleSaveSettings = (event) => {
         event.preventDefault();
-        // Here you would typically send the s3Settings to your server or some API endpoint
+        console.log('Saving settings', s3Settings);
+        axios.post(`${config.backend_api_url}/settings`, s3Settings)
+            .then((response) => {
+                Emitter.emit('notification', { variant: 'success', title: '', description: 'Settings saved successfully!' });
+                setSettingsChanged(false);
+            })
+            .catch((error) => {
+                console.error(error);
+                Emitter.emit('notification', { variant: 'warning', title: '', description: 'Saving failed with the error: ' + error });
+            });
     };
+
+    const handleTestConnection = (event) => {
+        event.preventDefault();
+        axios.get(`${config.backend_api_url}/settings/test`)
+            .then((response) => {
+                Emitter.emit('notification', { variant: 'success', title: '', description: 'Connection successful!' });
+            })
+            .catch((error) => {
+                console.error(error);
+                Emitter.emit('notification', { variant: 'warning', title: '', description: 'Connection failed with the error: ' + error.response.data.message.Code });
+            });
+    }
 
     React.useEffect(() => {
         axios.get(`${config.backend_api_url}/settings`)
@@ -65,7 +88,8 @@ const Settings: React.FunctionComponent<SettingsProps> = () => {
                 </TextContent>
             </PageSection>
             <PageSection>
-                <Form onSubmit={handleSubmit}>
+
+                <Form onSubmit={handleSaveSettings}>
                     <TextContent>
                         <Text component={TextVariants.h2}>S3 Settings</Text>
                     </TextContent>
@@ -116,7 +140,16 @@ const Settings: React.FunctionComponent<SettingsProps> = () => {
                             className='form-s3-settings-long'
                         />
                     </FormGroup>
-                    <Button type="submit" className='form-s3-submit'>Save S3 Settings</Button>
+                    <Flex>
+                        <FlexItem>
+                            <Button type="submit" className='form-s3-submit' isDisabled={!settingsChanged}>Save S3 Settings</Button>
+                        </FlexItem>
+                        <FlexItem>
+                            <Button className='form-s3-submit' onClick={handleTestConnection}>Test Connection</Button>
+                        </FlexItem>
+                    </Flex>
+
+
                 </Form>
             </PageSection>
         </Page>

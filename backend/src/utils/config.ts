@@ -21,33 +21,19 @@ function initializeS3Client() {
   }) as NodeJsClient<S3Client>;
 }
 
-function updateConfig(newConfig: {
-  accessKeyId: any;
-  secretAccessKey: any;
-  region: string;
-  endpoint: string;
-}) {
-  if (newConfig.accessKeyId !== undefined) {
-    accessKeyId = newConfig.accessKeyId;
-  }
-  if (newConfig.secretAccessKey !== undefined) {
-    secretAccessKey = newConfig.accessKeyId;
-  }
-  if (newConfig.region !== undefined) {
-    region = newConfig.region;
-  }
-  if (newConfig.endpoint !== undefined) {
-    endpoint = newConfig.endpoint;
-  }
-  if (
-    newConfig.accessKeyId ||
-    newConfig.secretAccessKey ||
-    newConfig.region ||
-    newConfig.endpoint
-  ) {
-    // Reinitialize the S3 client
-    s3Client = initializeS3Client();
-  }
+function updateConfig(
+  newAccessKeyId: string,
+  newSecretAccessKey: string,
+  newRegion: string,
+  newEndpoint: string,
+) {
+  accessKeyId = newAccessKeyId;
+  secretAccessKey = newSecretAccessKey;
+  region = newRegion;
+  endpoint = newEndpoint;
+
+  // Reinitialize the S3 client
+  s3Client = initializeS3Client();
 }
 
 function getConfig() {
