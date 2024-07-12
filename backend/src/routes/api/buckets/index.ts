@@ -5,7 +5,7 @@ const config = require('../../../utils/config');
 
 export default async (fastify: FastifyInstance): Promise<void> => {
   fastify.get('/', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { s3Client } = config.getConfig();
+    const { s3Client } = config.getS3Config();
     const command = new ListBucketsCommand({});
 
     try {
@@ -21,7 +21,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   });
 
   fastify.post('/', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { s3Client } = config.getConfig();
+    const { s3Client } = config.getS3Config();
     const { bucketName } = req.body as any;
     const createBucketCommand = new CreateBucketCommand({
       Bucket: bucketName,
@@ -37,7 +37,7 @@ export default async (fastify: FastifyInstance): Promise<void> => {
   });
 
   fastify.delete('/:bucketName', async (req: FastifyRequest, reply: FastifyReply) => {
-    const { s3Client } = config.getConfig();
+    const { s3Client } = config.getS3Config();
     const { bucketName } = req.params as any;
 
     const deleteBucketCommand = new DeleteBucketCommand({

@@ -1,4 +1,4 @@
-import logo from '@app/assets/bgimages/Logo-Red_Hat-OpenShift_AI-A-Reverse-RGB.svg';
+import logo from '@app/assets/bgimages/odh-logo.svg';
 import { IAppRoute, IAppRouteGroup, routes } from '@app/routes';
 import {
   Alert,
@@ -105,7 +105,7 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
 
 
   const renderNavItem = (route: IAppRoute, index: number) => (
-    <NavItem key={`${route.label}-${index}`} id={`${route.label}-${index}`} isActive={route.path === location.pathname} className='navitem-flex'>
+    <NavItem key={`${route.label}-${index}`} id={`${route.label}-${index}`} isActive={route.path.split('/')[1] === location.pathname.split('/')[1]} className='navitem-flex'>
       <NavLink exact={route.exact} to={route.path} className={route.path !== '#' ? '' : 'disabled-link'}>
         {t(route.label as string)}
       </NavLink>
@@ -118,6 +118,7 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
       id={`${group.label}-${groupIndex}`}
       title={group.label}
       isActive={group.routes.some((route) => route.path === location.pathname)}
+      isExpanded={group.isExpanded}
     >
       {group.routes.map((route, idx) => route.label && renderNavItem(route, idx))}
     </NavExpandable>
@@ -127,7 +128,16 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
     <Nav id="nav-first-simple" theme="dark">
       <NavList id="nav-list-first-simple">
         {routes.map(
-          (route, idx) => route.label && (!route.routes ? renderNavItem(route, idx) : renderNavGroup(route, idx))
+          (route, idx) => {
+            if ('path' in route) {
+              // This route is an IAppRoute because it has a 'path' property
+              return route.label && renderNavItem(route, idx);
+            } else if ('routes' in route) {
+              // This route is an IAppRouteGroup because it has a 'routes' property
+              return route.label && renderNavGroup(route, idx);
+            }
+            return null;
+          }
         )}
       </NavList>
     </Nav>
@@ -447,7 +457,7 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
         <MastheadBrand>
           <Brand src={logo} alt="Patternfly Logo" heights={{ default: '36px' }} />
           <TextContent>
-            <Text component={TextVariants.h3} className='title-text'>&nbsp;Companion</Text>
+            <Text component={TextVariants.h2} className='title-text'>Tools & Extensions Companion</Text>
           </TextContent>
         </MastheadBrand>
       </MastheadMain>
@@ -479,9 +489,9 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
       isNotificationDrawerExpanded={isDrawerExpanded}
     >
       {children}
-        <AlertGroup isToast isLiveRegion onOverflowClick={onAlertGroupOverflowClick} overflowMessage={overflowMessage}>
-          {alerts.slice(0, maxDisplayed)}
-        </AlertGroup>
+      <AlertGroup isToast isLiveRegion onOverflowClick={onAlertGroupOverflowClick} overflowMessage={overflowMessage}>
+        {alerts.slice(0, maxDisplayed)}
+      </AlertGroup>
     </Page>
   );
 };

@@ -37,7 +37,7 @@ body,
 }
 
 .title-text {
-  padding-right: 10px;
+  padding-left: 10px;
 }
 
 .bucket-select {
@@ -128,13 +128,33 @@ body,
   margin-top: 10px;
 }
 
-.form-s3-settings {
+.form-settings {
   width: 25%;
 }
 
-.form-s3-settings-long {
+.form-settings-long {
   width: 50%;
 }
-.form-s3-submit {
+
+.form-settings-submit {
   width: 250px;
+}
+
+.form-settings-slider {
+  width: 250px;
+}
+
+.settings-form {
+  padding-top: 10px;
+}
+
+.tab-logo {
+  width: 20px;
+  height: 20px;
+}
+
+.button-logo {
+  width: 16px;
+  height: 16px;
+  padding-top: 1px;
 }

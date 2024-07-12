@@ -4,7 +4,7 @@ import * as React from 'react';
 import { Redirect, Route, RouteComponentProps, Switch, useLocation } from 'react-router-dom';
 import Buckets from './components/Buckets/Buckets';
 import ObjectBrowser from './components/ObjectBrowser/ObjectBrowser';
-import Settings from './components/Settings/Settings';
+import SettingsManagement from './components/Settings/Settings';
 
 
 let routeFocusTimer: number;
@@ -24,6 +24,7 @@ export interface IAppRoute {
 export interface IAppRouteGroup {
   label: string;
   routes: IAppRoute[];
+  isExpanded?: boolean;
 }
 
 export type AppRouteConfig = IAppRoute | IAppRouteGroup;
@@ -31,34 +32,40 @@ export type AppRouteConfig = IAppRoute | IAppRouteGroup;
 
 const routes: AppRouteConfig[] = [
   {
-    component: () => <Redirect to="/buckets" />,
+    label: 'S3 Tools',
+    isExpanded: true,
+    routes: [
+      {
+        component: ObjectBrowser,
+        exact: true,
+        label: 'Object Browser',
+        path: '/objects/:bucketName/:prefix?',
+        title: 'Object Browser',
+      },
+      {
+        component: Buckets,
+        exact: true,
+        label: 'Bucket Management',
+        path: '/buckets',
+        title: 'Bucket Management',
+      },
+    ],
+  },
+  {
+    component: () => <Redirect to="/objects/:bucketName/:prefix?" />,
     exact: true,
     path: '/',
     title: 'Redirect',
   },
   {
-    component: ObjectBrowser,
-    exact: true,
-    label: 'Object Browser',
-    path: '/objects/:bucketName/:prefix?',
-    title: 'Object Browser',
-  },
-  {
-    component: Buckets,
-    exact: true,
-    label: 'Bucket Management',
-    path: '/buckets',
-    title: 'Bucket Management',
-  },
-  {
-    component: Settings,
+    component: SettingsManagement,
     exact: true,
     label: 'Settings',
     path: '/settings',
     title: 'Settings',
   },
   {
-    component: () => <Redirect to="/buckets" />,
+    component: () => <Redirect to="/objects/:bucketName/:prefix?" />,
     path: '*',
     title: 'Redirect',
   },

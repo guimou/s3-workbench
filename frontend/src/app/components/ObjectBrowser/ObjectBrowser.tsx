@@ -1,133 +1,104 @@
 import config from '@app/config';
 import { faDownload, faEye, faFile, faFolder, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { Breadcrumb, BreadcrumbItem, Button, Card, FileUpload, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption, Modal, Page, PageSection, Progress, ProgressSize, Text, TextContent, TextInput, TextVariants, ToolbarContent, ToolbarGroup, ToolbarItem, Tooltip } from '@patternfly/react-core';
+import {
+    Breadcrumb, BreadcrumbItem, Button, Card,
+    DropEvent,
+    FileUpload, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption,
+    HelperText,
+    HelperTextItem,
+    Modal,
+    MultipleFileUpload,
+    MultipleFileUploadMain,
+    MultipleFileUploadStatus,
+    MultipleFileUploadStatusItem,
+    Page, PageSection, Progress, ProgressSize, Text, TextContent, TextInput, TextVariants, ToolbarContent, ToolbarGroup, ToolbarItem, Tooltip
+} from '@patternfly/react-core';
 import { SearchIcon } from '@patternfly/react-icons';
+import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import axios from 'axios';
 import * as React from 'react';
 import { useHistory, useLocation, useParams } from 'react-router-dom';
 import Emitter from '../../utils/emitter';
 import DocumentRenderer from '../DocumentRenderer/DocumentRenderer';
+import { createFolder, deleteFile, loadBuckets, refreshObjects } from './objectBrowserFunctions';
+import { BucketsList, ObjectRow, PrefixRow, UploadedFile, S3Objects, S3Prefixes, ExtendedFile } from './objectBrowserTypes';
+import HfLogo from '@app/assets/bgimages/hf-logo.svg';
+import pLimit from 'p-limit';
 
 interface ObjectBrowserProps { }
 
-class Bucket {
-    Name: string;
-    CreationDate: string;
-
-    constructor(name: string, creationDate: string) {
-        this.Name = name;
-        this.CreationDate = creationDate;
-    }
-}
-
-class Owner {
-    DisplayName: string;
-    ID: string;
-
-    constructor(displayName: string, id: string) {
-        this.DisplayName = displayName;
-        this.ID = id;
-    }
-}
-
-class BucketsList {
-    buckets: Bucket[];
-    owner: Owner;
-
-    constructor(buckets: Bucket[], owner: Owner) {
-        this.buckets = buckets;
-        this.owner = owner;
-    }
-}
-
-const formatBytes = (bytes: number): string => {
-    if (bytes === 0) {
-        return '0 B';
-    }
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    const value = parseFloat((bytes / Math.pow(k, i)).toFixed(2));
-    return `${value} ${sizes[i]}`;
-};
-
-class S3Object {
-    Key: string;
-    LastModified: string;
-    Size: string;
-    OriginalSize: number;
-
-    constructor(key: string, lastModified: string, originalSize: string) {
-        this.Key = key;
-        this.LastModified = lastModified;
-        this.Size = formatBytes(parseInt(originalSize));
-        this.OriginalSize = parseInt(originalSize);
-    }
-}
-
-class S3Objects {
-    s3Objects: S3Object[];
-
-    constructor(Objects: S3Object[]) {
-        this.s3Objects = Objects;
-    }
-}
-
-class S3Prefix {
-    Prefix: string;
-
-    constructor(prefix: string) {
-        this.Prefix = prefix;
-    }
-}
-
-class S3Prefixes {
-    s3Prefixes: S3Prefix[];
-
-    constructor(Prefixes: S3Prefix[]) {
-        this.s3Prefixes = Prefixes;
-    }
-}
-
-interface ObjectRow {
-    key: string;
-    lastModified: string;
-    size: string;
-    originalSize: number;
-}
-
-interface PrefixRow {
-    prefix: string;
-}
-
 const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
+
+    /*
+      Common variables
+    */
+
+    // React hooks
     const history = useHistory();
     const location = useLocation();
     const abortUploadController = React.useRef<AbortController | null>(null);
+
+    // Limit the number of concurrent file uploads or transfers
+    const [maxConcurrentTransfers, setMaxConcurrentTransfers] = React.useState(2);
+
+    React.useEffect(() => {
+        axios.get(`${config.backend_api_url}/settings/max-concurrent-transfers`)
+            .then(response => {
+                setMaxConcurrentTransfers(response.data.maxConcurrentTransfers);
+            })
+            .catch(error => {
+                console.error('Error getting max concurrent transfers', error);
+            });
+    }, []);
+
+    // URL parameters
     const { bucketName } = useParams<{ bucketName: string }>();
     const { prefix } = useParams<{ prefix: string }>();
 
-    const [formSelectBucket, setFormSelectBucket] = React.useState(bucketName);
-
     // Buckets handling
     const [bucketsList, setBucketsList] = React.useState<BucketsList | null>(null);
+    const [formSelectBucket, setFormSelectBucket] = React.useState(bucketName);
 
-    // S3 Objects handling
-    const [searchObjectText, setSearchObjectText] = React.useState('');
-    const [decodedPrefix, setDecodedPrefix] = React.useState('');
-    const [s3Objects, setS3Objects] = React.useState<S3Objects | null>(null);
-    const [s3Prefixes, setS3Prefixes] = React.useState<S3Prefixes | null>(null);
+    // Load buckets at startup and when location changes
+    React.useEffect(() => {
+        loadBuckets(bucketName, history, setBucketsList);
+    }, [location]);
 
-    // File viewer handling
-    const [fileData, setFileData] = React.useState('');
-    const [fileName, setFileName] = React.useState('');
-    const [isFileViewerOpen, setIsFileViewerOpen] = React.useState(false);
+    // Refresh objects from the bucket when location changes
+    React.useEffect(() => {
+        refreshObjects(bucketName, prefix, setDecodedPrefix, setS3Objects, setS3Prefixes);
+    }, [location, prefix]);
 
-    const handleFileViewerToggle = (_event: KeyboardEvent | React.MouseEvent) => {
-        setIsFileViewerOpen(!isFileViewerOpen);
+    // Handle bucket change in the dropdown
+    const handleBucketChange = (_event: React.FormEvent<HTMLSelectElement>, value: string) => {
+        setFormSelectBucket(value);
+        history.push(`/objects/${value}`);
     }
+
+    /*
+      Utilities
+    */
+    // Copy the prefix (aka full "folder" path) to the clipboard
+    const copyPrefixToClipboard = () => {
+        navigator.clipboard.writeText('/' + decodedPrefix).then(
+            () => {
+                Emitter.emit('notification', { variant: 'success', title: 'Path copied', description: 'The path has been successfully copied to the clipboard.' });
+            },
+            (err) => {
+                console.error('Failed to copy prefix to clipboard: ', err);
+            }
+        );
+    };
+
+    /*
+      Objects display
+    */
+    const [searchObjectText, setSearchObjectText] = React.useState(''); // The text to search for in the objects names
+    const [decodedPrefix, setDecodedPrefix] = React.useState(''); // The decoded prefix (aka full "folder" path)
+    const [s3Objects, setS3Objects] = React.useState<S3Objects | null>(null); // The list of objects with the selected prefix ("folder")
+    const [s3Prefixes, setS3Prefixes] = React.useState<S3Prefixes | null>(null); // The list of prefixes ("subfolders") in the current prefix
 
     const columnNames = {
         key: 'Key',
@@ -135,6 +106,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         size: 'Size'
     };
 
+    // Convert the S3 objects and prefixes to rows
     const prefixRows: PrefixRow[] = s3Prefixes ? s3Prefixes.s3Prefixes.map((s3Prefix) => ({
         prefix: s3Prefix.Prefix
     })) : [];
@@ -166,7 +138,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         return false;
     });
 
-
+    // Helper to validate which files can be viewed
     const validateFileView = (filename: string, size: number) => {
         const allowedExtensions = ['txt', 'log', 'jpg', 'py', 'json', 'yaml', 'yml', 'md', 'html', 'css', 'js', 'ts', 'tsx', 'jsx', 'sh', 'bash', 'sql', 'csv', 'xml', 'png', 'gif', 'bmp', 'jpeg', 'svg', 'webp', 'ico'];
         if (size > 1024 * 1024) {
@@ -178,6 +150,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         return true;
     }
 
+    // Navigate when clicking on a prefix
     const handlePrefixClick = (plainTextPrefix: string) => (event: React.MouseEvent<HTMLButtonElement>) => {
         setS3Objects(null);
         setS3Prefixes(null);
@@ -185,7 +158,19 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         history.push(plainTextPrefix !== '' ? `/objects/${bucketName}/${btoa(plainTextPrefix)}` : `/objects/${bucketName}`);
     }
 
-    const handleObjectView = (key: string) => async (event: React.MouseEvent<HTMLButtonElement>) => {
+    /*
+      File viewing
+    */
+    const [fileData, setFileData] = React.useState('');
+    const [fileName, setFileName] = React.useState('');
+
+    const [isFileViewerOpen, setIsFileViewerOpen] = React.useState(false);
+    const handleFileViewerToggle = (_event: KeyboardEvent | React.MouseEvent) => {
+        setIsFileViewerOpen(!isFileViewerOpen);
+    }
+
+    const handleObjectViewClick = (key: string) => async (event: React.MouseEvent<HTMLButtonElement>) => {
+        // Retrieve the object from the backend and open the File Viewer modal
         await axios.get(`${config.backend_api_url}/objects/view/${bucketName}/${btoa(key)}`, { responseType: 'arraybuffer' })
             .then((response) => {
                 setFileName(key.split('/').pop() || '');
@@ -201,82 +186,79 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
             });
     }
 
-    const handleBucketChange = (_event: React.FormEvent<HTMLSelectElement>, value: string) => {
-        setFormSelectBucket(value);
-        history.push(`/objects/${value}`);
+
+    /*
+      File(s) upload progress trackers
+    */
+
+    // We have 2 progress trackers: one for the upload to the backend and one for the upload to S3
+    // They are stored in objects with the encoded key as key (yes, I know...) and the percentage as value
+    interface UploadToS3Percentage {
+        loaded: number;
+        status?: string;
     }
 
-    // Fetch the objects from the object store bucket
-    React.useEffect(() => {
-        let url = '';
-        if (bucketName === ':bucketName') {
-            return;
-        }
-        if (prefix === undefined || prefix === ':prefix') {
-            setDecodedPrefix('');
-            url = `${config.backend_api_url}/objects/${bucketName}`;
-        } else {
-            setDecodedPrefix(atob(prefix));
-            url = `${config.backend_api_url}/objects/${bucketName}/${prefix}`;
-        }
-        axios.get(url)
-            .then((response) => {
-                const { objects, prefixes } = response.data;
-                if (objects !== undefined) {
-                    const newS3Objects = new S3Objects(
-                        objects.map((s3Object: any) => new S3Object(s3Object.Key, s3Object.LastModified, s3Object.Size))
-                    );
-                    setS3Objects(newS3Objects);
-                } else {
-                    setS3Objects(null);
-                }
-                if (prefixes !== undefined) {
-                    const newS3Prefixes = new S3Prefixes(
-                        prefixes.map((s3Prefix: any) => new S3Prefix(s3Prefix.Prefix))
-                    );
-                    setS3Prefixes(newS3Prefixes);
-                } else {
-                    setS3Prefixes(null);
-                }
-            })
-            .catch((error) => {
-                console.error('Error fetching objects', error);
-            });
-    }, [location, prefix]);
-
-    // Load buckets at startup
-    React.useEffect(() => {
-        axios.get(`${config.backend_api_url}/buckets`)
-            .then(response => {
-                const { owner, buckets } = response.data;
-                const newBucketsState = new BucketsList(
-                    buckets.map((bucket: any) => new Bucket(bucket.Name, bucket.CreationDate)),
-                    new Owner(owner.DisplayName, owner.ID)
-                );
-                setBucketsList(newBucketsState);
-                if (bucketName === ":bucketName") {
-                    history.push(`/objects/${buckets[0].Name}`);
-                }
-            })
-            .catch(error => {
-                console.error(error);
-            });
-    }, [location]);
-
-    // Upload file handling
-    const [isUploadFileModalOpen, setIsUploadFileModalOpen] = React.useState(false);
-    const handleUploadFileModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
-        setIsUploadFileModalOpen(!isUploadFileModalOpen);
+    interface UploadToS3Percentages {
+        [key: string]: UploadToS3Percentage;
     }
 
-    const resetUploadPanel = () => {
-        setFileUploadValue(undefined);
-        setFilename('');
-        setUploadedToS3Percentage(-1);
-        setUploadedPercentage(-1);
-        setIsUploadFileModalOpen(false);
+    interface UploadPercentage {
+        loaded: number;
+    }
+
+    interface UploadPercentages {
+        [key: string]: UploadPercentage;
+    }
+
+    const [uploadToS3Percentages, setUploadToS3Percentages] = React.useState<UploadToS3Percentages>({});
+    const [uploadPercentages, setUploadPercentages] = React.useState<UploadPercentages>({});
+
+    const updateS3Progress = (key: string, value: number, status: string = '') => {
+        setUploadToS3Percentages(prevPercentages => ({
+            ...prevPercentages,
+            [key]: {
+                ...prevPercentages[key],
+                loaded: value,
+                status: status,
+            },
+        }));
+    }
+
+    const updateProgress = (encodedKey: string, loaded: number) => {
+        setUploadPercentages(prevPercentages => ({
+            ...prevPercentages,
+            [encodedKey]: {
+                ...prevPercentages[encodedKey],
+                loaded: loaded,
+            },
+        }));
+    };
+
+    /*
+      Single file upload
+    */
+
+    const [singleFileUploadValue, setSingleFileUploadValue] = React.useState<File | undefined>(undefined); // File reference
+    const [singleFilename, setSingleFilename] = React.useState(''); // Filename
+
+    const [isUploadSingleFileModalOpen, setIsUploadSingleFileModalOpen] = React.useState(false);
+    const handleUploadSingleFileModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
+        setIsUploadSingleFileModalOpen(!isUploadSingleFileModalOpen);
+    }
+
+    const resetSingleFileUploadPanel = () => {
+        setSingleFileUploadValue(undefined);
+        setSingleFilename('');
+        setUploadToS3Percentages({});
+        setUploadPercentages({});
+        setIsUploadSingleFileModalOpen(false);
         abortUploadController.current = null;
     }
+
+    const handleFileInputChange = (_, file: File) => {
+        setSingleFilename(file.name);
+        setSingleFileUploadValue(file);
+    };
 
     const handleUploadFileCancel = (_event: React.MouseEvent) => {
         if (abortUploadController.current) {
@@ -289,84 +271,263 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
             .catch(error => {
                 console.error('Error aborting upload', error);
             });
-        resetUploadPanel();
+        resetSingleFileUploadPanel();
     }
 
-    const [uploadedToS3Percentage, setUploadedToS3Percentage] = React.useState(-1);
-    const [uploadedPercentage, setUploadedPercentage] = React.useState(-1);
-
     const handleUploadFileConfirm = (_event: React.MouseEvent) => {
-        console.log('Uploading file', filename);
-        const formData = new FormData();
-        if (!fileUploadValue) {
+        if (!singleFileUploadValue) {
             return;
         }
-        formData.append('file', fileUploadValue);
-        const fileSize = fileUploadValue.size;
+        const fileSize = singleFileUploadValue.size;
 
-        const encodedKey = btoa(decodedPrefix + filename);
+        // Reset progress trackers
+        setUploadPercentages(() => ({
+            [singleFilename]: { loaded: 0 },
+        }));
+        setUploadToS3Percentages(() => ({
+            [singleFilename]: { loaded: 0 },
+        }));
 
-        // Upload progress feedback
-        const eventSource = new EventSource(`${config.backend_api_url}/objects/upload-progress`);
+        const formData = new FormData();
+        formData.append('file', singleFileUploadValue);
+
+        // Upload to S3 progress feedback
+        const eventSource = new EventSource(`${config.backend_api_url}/objects/upload-progress/${btoa(decodedPrefix + singleFilename)}`);
         eventSource.onmessage = (event) => {
             const data = JSON.parse(event.data);
             if (data.loaded !== 0 && data.status === 'uploading') {
-                setUploadedToS3Percentage(Math.round((data.loaded / fileSize) * 100));
-            } else {
-                setUploadedToS3Percentage(-1);
+                updateS3Progress(singleFilename, Math.round((data.loaded / fileSize) * 100));
             }
             if (data.status === 'completed') {
+                console.log('Upload to S3 completed');
                 eventSource.close();
-                setUploadedToS3Percentage(-1);
+                delete uploadToS3Percentages[singleFilename];
             }
         }
 
         // Upload
         abortUploadController.current = new AbortController();
-        axios.post(`${config.backend_api_url}/objects/upload/${bucketName}/${encodedKey}`, formData, {
+        axios.post(`${config.backend_api_url}/objects/upload/${bucketName}/${btoa(decodedPrefix + singleFilename)}`, formData, {
             signal: abortUploadController.current.signal,
             headers: {
                 'Content-Type': 'multipart/form-data'
             },
             onUploadProgress: (progressEvent) => {
-                setUploadedPercentage(Math.round((progressEvent.loaded / fileSize) * 100));
+                updateProgress(singleFilename, Math.round((progressEvent.loaded / fileSize) * 100));
             }
         })
             .then(response => {
-                const oldFileName = filename;
+                const oldFileName = singleFilename;
                 Emitter.emit('notification', { variant: 'success', title: 'File uploaded', description: 'File "' + oldFileName + '" has been successfully uploaded.' });
-                resetUploadPanel();
+                resetSingleFileUploadPanel();
                 history.push(`/objects/${bucketName}/${btoa(decodedPrefix)}`);
 
             })
             .catch(error => {
                 console.error('Error uploading file', error);
                 Emitter.emit('notification', { variant: 'warning', title: 'File upload failed', description: String(error) });
-                resetUploadPanel();
+                resetSingleFileUploadPanel();
             });
     }
 
-    const [fileUploadValue, setFileUploadValue] = React.useState<File | undefined>(undefined);
-    const [filename, setFilename] = React.useState('');
 
-    const handleFileInputChange = (_, file: File) => {
-        setFilename(file.name);
-        setFileUploadValue(file);
-    };
 
     const handleClear = (_event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
-        setFilename('');
-        setFileUploadValue(undefined);
+        setSingleFilename('');
+        setSingleFileUploadValue(undefined);
     };
 
-    // Delete file handling
+    /*
+      Multiple files upload
+    */
+
+    const [currentFiles, setCurrentFiles] = React.useState<ExtendedFile[]>([]);
+    const [uploadedFiles, setUploadedFiles] = React.useState<UploadedFile[]>([]);
+    const [showStatus, setShowStatus] = React.useState(false);
+    const [statusIcon, setStatusIcon] = React.useState('inProgress');
+
+    const [isUploadFilesModalOpen, setIsUploadFilesModalOpen] = React.useState(false);
+    const handleUploadFilesModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
+        setIsUploadFilesModalOpen(!isUploadFilesModalOpen);
+    }
+
+    const handleUploadFilesClose = (_event: React.MouseEvent) => {
+        setIsUploadFilesModalOpen(false);
+        setCurrentFiles([]);
+        setUploadedFiles([]);
+        setUploadToS3Percentages({});
+        setUploadPercentages({});
+        setShowStatus(false);
+    }
+
+    if (!showStatus && currentFiles.length > 0) {
+        setShowStatus(true);
+    }
+
+    // determine the icon that should be shown for the overall status list
+    React.useEffect(() => {
+        if (uploadedFiles.length < currentFiles.length) {
+            setStatusIcon('inProgress');
+        } else if (uploadedFiles.every((file) => file.loadResult === 'success')) {
+            setStatusIcon('success');
+        } else {
+            setStatusIcon('danger');
+        }
+    }, [uploadedFiles, currentFiles]);
+
+    // remove files from both state arrays based on their paths
+    const removeFiles = (pathsOfFilesToRemove: string[]) => {
+        const newCurrentFiles = currentFiles.filter(
+            (currentFile) => !pathsOfFilesToRemove.some((path) => path === currentFile.path)
+        );
+
+        setCurrentFiles(newCurrentFiles);
+
+        const newUploadedFiles = uploadedFiles.filter(
+            (uploadedFile) => !pathsOfFilesToRemove.some((path) => path === uploadedFile.path)
+        );
+
+        setUploadedFiles(newUploadedFiles);
+    };
+
+    const updateCurrentFiles = (files: ExtendedFile[]): void => {
+        setCurrentFiles((prevFiles) => [...prevFiles, ...files]);
+    };
+
+    const handleFileDrop = async (_event: DropEvent, droppedFiles: File[]) => {
+        console.log('Dropped files', droppedFiles);
+        const fullDroppedFiles = droppedFiles as ExtendedFile[]; // cast to uploadedFile type to read "path" property
+        // identify what, if any, files are re-uploads of already uploaded files
+        // filtering on full path in case multiple folders gave the same file
+        const currentFilePaths = currentFiles.map((file) => file.path);
+        const reUploads = fullDroppedFiles.filter((fullDroppedFiles) => currentFilePaths.includes(fullDroppedFiles.path));
+
+        /** this promise chain is needed because if the file removal is done at the same time as the file adding react
+         * won't realize that the status items for the re-uploaded files needs to be re-rendered */
+        Promise.resolve()
+            .then(() => removeFiles(reUploads.map((file) => file.path)))
+            .then(() => updateCurrentFiles(fullDroppedFiles));
+
+        // Add the new files to the progress trackers
+        setUploadPercentages((prevPercentages) => {
+            const newPercentages = { ...prevPercentages };
+            for (const file of fullDroppedFiles) {
+                newPercentages[decodedPrefix + file.path.replace(/^\//, '')] = { loaded: 0 };
+            }
+            return newPercentages;
+        });
+        
+        setUploadToS3Percentages((prevPercentages) => {
+            const newPercentages = { ...prevPercentages };
+            for (const file of fullDroppedFiles) {
+                newPercentages[decodedPrefix + file.path.replace(/^\//, '')] = { loaded: 0, status: 'queued' };
+            }
+            return newPercentages;
+        });
+
+        // Start the upload process, using limit to control the number of concurrent uploads
+        const limit = pLimit(maxConcurrentTransfers);
+
+        const promises = fullDroppedFiles.map((file: ExtendedFile) => 
+            limit(() => handleFileUpload(file)),
+        );
+
+        await Promise.all(promises);
+    };
+
+    // Processes a file upload
+    const handleFileUpload = async (file: File): Promise<void> => {
+        const fullFile = file as ExtendedFile;
+        const fullPath = decodedPrefix + fullFile.path.replace(/^\//, ''); // remove leading slash in case of folder upload
+
+        if (uploadPercentages[fullPath]) { // File already in upload progress, skipping
+            return;
+        }
+
+        const fileSize = fullFile.size;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // Upload to S3 progress feedback
+        const eventSource = new EventSource(`${config.backend_api_url}/objects/upload-progress/${btoa(fullPath)}`);
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.loaded !== 0 && data.status === 'uploading') {
+                updateS3Progress(fullPath, Math.round((data.loaded / fileSize) * 100), data.status);
+            }
+            if (data.status === 'completed') {
+                updateS3Progress(fullPath, 100, data.status);
+                setUploadedFiles((prevUploadedFiles) => {
+                    const fileExists = prevUploadedFiles.some(file =>
+                        file.path === fullFile.path && file.loadResult === 'success'
+                    );
+                    if (!fileExists) {
+                        return [
+                            ...prevUploadedFiles,
+                            { fileName: fullFile.name, loadResult: 'success', path: fullFile.path }
+                        ];
+                    }
+                    return prevUploadedFiles;
+                });
+                refreshObjects(bucketName, prefix, setDecodedPrefix, setS3Objects, setS3Prefixes);
+                eventSource.close();
+            }
+        }
+
+        await axios.post(`${config.backend_api_url}/objects/upload/${bucketName}/${btoa(fullPath)}`, formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            },
+            onUploadProgress: (progressEvent) => {
+                updateProgress(fullPath, Math.round((progressEvent.loaded / fileSize) * 100));
+            }
+        })
+            .catch(error => {
+                console.error('Error uploading file', error);
+                Emitter.emit('notification', { variant: 'warning', title: 'File upload failed', description: String(error) });
+                setUploadedFiles((prevUploadedFiles) => [
+                    ...prevUploadedFiles,
+                    { loadError: error, fileName: fullFile.name, loadResult: 'danger', path: fullPath }
+                ]);
+            });
+    };
+
+    // add helper text to a status item showing any error encountered during the file reading process
+    const createHelperText = (file: File) => {
+        const fullFile = file as ExtendedFile;
+        const fileResult = uploadedFiles.find((uploadedFile) => uploadedFile.path === fullFile.path);
+        if (fileResult?.loadError) {
+            return (
+                <HelperText isLiveRegion>
+                    <HelperTextItem variant={'error'}>{fileResult.loadError.toString()}</HelperTextItem>
+                </HelperText>
+            );
+        }
+        return null; // Explicitly return null when there's no error
+    };
+
+    const [successfullyUploadedFileCount, setSuccessfullyUploadedFileCount] = React.useState(0);
+
+    React.useEffect(() => {
+        const successCount = uploadedFiles.filter((uploadedFile) => uploadedFile.loadResult === 'success').length;
+        setSuccessfullyUploadedFileCount(successCount);
+    }, [uploadedFiles]);
+
+    /*
+      File deletion
+    */
     const [isDeleteFileModalOpen, setIsDeleteFileModalOpen] = React.useState(false);
     const [selectedFile, setSelectedFile] = React.useState('');
     const [fileToDelete, setFileToDelete] = React.useState('');
 
-    const handleButtonDeleteFile = (key: string) => (_event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    const handleDeleteFileModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
+        setIsDeleteFileModalOpen(!isDeleteFileModalOpen);
+    }
+
+    const handleDeleteFileClick = (key: string) => (event: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
         setSelectedFile(key);
-        setIsDeleteFileModalOpen(true);
+        handleDeleteFileModalToggle(event);
     }
 
     const validateFileToDelete = (): boolean => {
@@ -377,46 +538,36 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         }
     }
 
-    const handleDeleteFileModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
-        setIsDeleteFileModalOpen(!isDeleteFileModalOpen);
-    }
-
-    const handleDeleteFileConfirm = (_event: React.MouseEvent) => {
+    const handleDeleteFileConfirm = () => {
         if (!validateFileToDelete()) {
-            alert('Invalid file to delete')
+            console.log('Invalid file to delete');
             return;
+        } else {
+            deleteFile(bucketName, decodedPrefix, selectedFile, history, setFileToDelete, setIsDeleteFileModalOpen);
         }
-        setIsDeleteFileModalOpen(false);
-        axios.delete(`${config.backend_api_url}/objects/${bucketName}/${btoa(selectedFile)}`)
-            .then(response => {
-                Emitter.emit('notification', { variant: 'success', title: 'File deleted', description: 'File "' + selectedFile + '" has been successfully deleted.' });
-                history.push(`/objects/${bucketName}/${btoa(decodedPrefix)}`);
-                setFileToDelete('');
-            })
-            .catch(error => {
-                console.error('Error deleting file', error);
-                Emitter.emit('notification', { variant: 'warning', title: 'File deletion failed', description: String(error) });
-            });
     }
 
-    const handleDeleteFileCancel = (_event: React.MouseEvent) => {
+    const handleDeleteFileCancel = () => {
         setFileToDelete('');
         setIsDeleteFileModalOpen(false);
     }
 
-    // Create folder handling
+    /*
+      Folder creation
+    */
     const [newFolderName, setNewFolderName] = React.useState('');
     const [newFolderNameRulesVisibility, setNewFolderNameRulesVisibility] = React.useState(false);
+
     const [isCreateFolderModalOpen, setIsCreateFolderModalOpen] = React.useState(false);
     const handleCreateFolderModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
         setIsCreateFolderModalOpen(!isCreateFolderModalOpen);
     }
 
-    function validateFolderName(folderName: string): boolean {
+    const validateFolderName = (folderName: string): boolean => {
         if (folderName === '') {
             return false;
         }
-        const validCharacters = /^[a-zA-Z0-9!.-_*'()]+$/;
+        const validCharacters = /^[b-zA-Z0-9!.\-_*'()]+$/;
         if (!validCharacters.test(folderName)) {
             return false;
         }
@@ -436,25 +587,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
             alert('Invalid folder name');
             return;
         } else {
-            const formData = new FormData();
-            const emptyFile = new File([''], '.s3keep');
-            formData.append('file', emptyFile);
-            const encodedKey = btoa(decodedPrefix + newFolderName + '/.s3keep');
-            axios.post(`${config.backend_api_url}/objects/upload/${bucketName}/${encodedKey}`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            })
-                .then(response => {
-                    const oldFolderName = newFolderName;
-                    Emitter.emit('notification', { variant: 'success', title: 'Folder created', description: 'Folder "' + oldFolderName + '" has been successfully created.' });
-                    setNewFolderName('');
-                    history.push(`/objects/${bucketName}/${btoa(decodedPrefix + newFolderName + '/')}`);
-                })
-                .catch(error => {
-                    console.error('Error creating folder', error);
-                    Emitter.emit('notification', { variant: 'warning', title: 'Folder creation failed', description: String(error) });
-                });
+            createFolder(bucketName, decodedPrefix, newFolderName, history, setNewFolderName);
             setNewFolderName('');
             setIsCreateFolderModalOpen(false);
         }
@@ -468,6 +601,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
     // Import HF model handling
     const [modelName, setModelName] = React.useState('');
     const [isImportModelModalOpen, setIsImportModelModalOpen] = React.useState(false);
+    const [modelFiles, setModelFiles] = React.useState<string[]>([]);
     const handleImportModelModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
         setIsImportModelModalOpen(!isImportModelModalOpen);
     }
@@ -477,20 +611,49 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
         setModelName('');
     }
 
+    interface DataValue {
+        loaded: number;
+        status: string;
+        total: number;
+    }
+
     const handleImportModelConfirm = (_event: React.MouseEvent) => {
-        console.log('Importing model', modelName);
-        axios.get(`${config.backend_api_url}/objects/import/${bucketName}/${btoa(decodedPrefix)}/${btoa(modelName)}`)
+        const eventSource = new EventSource(`${config.backend_api_url}/objects/import-model-progress`);
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (modelFiles.length === 0) {
+                setModelFiles(Object.keys(data));
+            }
+            Object.entries(data).forEach(([name, value]) => {
+                const { loaded, status, total } = value as DataValue;
+                console.log(`Name: ${name}, Loaded: ${loaded}, Status: ${status}`);
+                updateS3Progress(name, Math.round((loaded / total) * 100), status);
+            });
+            const allCompleted = Object.entries(data).every(([_, value]) => {
+                const { status } = value as DataValue;
+                return status === 'completed';
+            });
+
+            if (allCompleted) {
+                eventSource.close();
+            }
+        }
+
+        axios.get(`${config.backend_api_url}/objects/hf-import/${bucketName}/${btoa(decodedPrefix)}/${btoa(modelName)}`)
             .then(response => {
                 Emitter.emit('notification', { variant: 'success', title: 'Model imported', description: 'Model "' + modelName + '" has been successfully imported.' });
+                setModelName('');
+                setModelFiles([]);
+                setUploadToS3Percentages({});
+                setIsImportModelModalOpen(false);
                 history.push(`/objects/${bucketName}/${btoa(decodedPrefix)}`);
             })
             .catch(error => {
                 console.error('Error cloning model', error);
                 Emitter.emit('notification', { variant: 'warning', title: 'Model importing failed', description: String(error) });
+                setModelName('');
+                setIsImportModelModalOpen(false);
             });
-        setModelName('');
-        setIsImportModelModalOpen(false);
-
     }
     return (
         <Page className='buckets-list'>
@@ -521,31 +684,42 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
             <PageSection>
                 <Flex direction={{ default: 'column' }}>
                     <FlexItem>
-                        <Breadcrumb ouiaId="PrefixBreadcrumb">
-                            <BreadcrumbItem
-                                to={`/objects/${bucketName}`}>
-                                <Button variant="link"
-                                    className='breadcrumb-button'
-                                    onClick={handlePrefixClick('')}
-                                >
-                                    {bucketName}
+                        <Flex>
+                            <FlexItem>
+                                <Breadcrumb ouiaId="PrefixBreadcrumb">
+                                    <BreadcrumbItem
+                                        to={`/objects/${bucketName}`}>
+                                        <Button variant="link"
+                                            className='breadcrumb-button'
+                                            onClick={handlePrefixClick('')}
+                                        >
+                                            {bucketName}
+                                        </Button>
+                                    </BreadcrumbItem>
+                                    {decodedPrefix.slice(0, -1).split('/').map((part, index) => (
+                                        <BreadcrumbItem
+                                            key={index}
+                                        >
+                                            <Button variant="link"
+                                                className='breadcrumb-button'
+                                                onClick={handlePrefixClick(decodedPrefix.slice(0, -1).split('/').slice(0, index + 1).join('/') + '/')}
+                                                isDisabled={index === decodedPrefix.slice(0, -1).split('/').length - 1}
+                                            >
+                                                {part}
+                                            </Button>
+                                        </BreadcrumbItem>
+                                    ))
+                                    }
+                                </Breadcrumb>
+                            </FlexItem>
+                            <FlexItem>
+                                <Button variant="secondary" onClick={copyPrefixToClipboard} className='copy-path-button' ouiaId="CopyPath">
+                                    Copy Path
                                 </Button>
-                            </BreadcrumbItem>
-                            {decodedPrefix.slice(0, -1).split('/').map((part, index) => (
-                                <BreadcrumbItem
-                                    key={index}
-                                >
-                                    <Button variant="link"
-                                        className='breadcrumb-button'
-                                        onClick={handlePrefixClick(decodedPrefix.slice(0, -1).split('/').slice(0, index + 1).join('/') + '/')}
-                                        isDisabled={index === decodedPrefix.slice(0, -1).split('/').length - 1}
-                                    >
-                                        {part}
-                                    </Button>
-                                </BreadcrumbItem>
-                            ))
-                            }
-                        </Breadcrumb>
+                            </FlexItem>
+                        </Flex>
+
+
                     </FlexItem>
                     <FlexItem>
                         <Flex>
@@ -567,11 +741,15 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
                                             Create Folder</Button>
                                     </FlexItem>
                                     <FlexItem className='file-folder-buttons'>
-                                        <Button variant="primary" onClick={handleUploadFileModalToggle} ouiaId="ShowUploadFileModal">
-                                            Upload File</Button>
+                                        <Button variant="primary" onClick={handleUploadSingleFileModalToggle} ouiaId="ShowUploadSingleFileModal">
+                                            Upload Single File</Button>
                                     </FlexItem>
                                     <FlexItem className='file-folder-buttons'>
-                                        <Button variant="primary" onClick={handleImportModelModalToggle} ouiaId="ShowUploadFileModal">
+                                        <Button variant="primary" onClick={handleUploadFilesModalToggle} ouiaId="ShowUploadMultipleFileModal">
+                                            Upload Multiple Files</Button>
+                                    </FlexItem>
+                                    <FlexItem className='file-folder-buttons'>
+                                        <Button variant="primary" onClick={handleImportModelModalToggle} icon={<img className='button-logo' src={HfLogo} alt="HuggingFace Logo" />} ouiaId="ShowImportHFModal">
                                             Import HF Model</Button>
                                     </FlexItem>
                                 </Flex>
@@ -624,7 +802,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
                                                             <Tooltip content={<div>View this file.</div>}>
                                                                 <Button variant="primary" className='button-file-control'
                                                                     isDisabled={!validateFileView(row.key.split('/').pop() || '', row.originalSize)}
-                                                                    onClick={handleObjectView(row.key)}>
+                                                                    onClick={handleObjectViewClick(row.key)}>
                                                                     <FontAwesomeIcon icon={faEye} />
                                                                 </Button>
                                                             </Tooltip>
@@ -642,7 +820,7 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
                                                         <ToolbarItem>
                                                             <Tooltip content={<div>Delete this file.</div>}>
                                                                 <Button variant="danger" className='button-file-control'
-                                                                    onClick={handleButtonDeleteFile(row.key)}>
+                                                                    onClick={handleDeleteFileClick(row.key)}>
                                                                     <FontAwesomeIcon icon={faTrash} />
                                                                 </Button>
                                                             </Tooltip>
@@ -691,76 +869,42 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
                 <DocumentRenderer fileData={fileData} fileName={fileName} />
             </Modal>
             <Modal
-                title={"Upload file"}
-                className="bucket-modal"
-                isOpen={isUploadFileModalOpen}
-                onClose={handleUploadFileModalToggle}
-                actions={[
-                    <Button key="confirm" variant="primary" onClick={handleUploadFileConfirm} isDisabled={filename === ""}>
-                        Upload
-                    </Button>,
-                    <Button key="cancel" variant="link" onClick={handleUploadFileCancel}>
-                        Cancel
-                    </Button>
-                ]}
-            >
-                <FileUpload
-                    id="simple-file"
-                    value={fileUploadValue}
-                    filename={filename}
-                    filenamePlaceholder="Drag and drop a file or upload one"
-                    onFileInputChange={handleFileInputChange}
-                    onClearClick={handleClear}
-                    browseButtonText="Browse"
-                />
-                <Flex direction={{ default: 'column' }} className='upload-bars'>
-                    <FlexItem hidden={(uploadedPercentage === -1)}>
-                        <Progress value={uploadedPercentage} title="Upload to backend progress" size={ProgressSize.sm} />
-                    </FlexItem>
-                    <FlexItem hidden={(uploadedToS3Percentage === -1)}>
-                        <Progress value={uploadedToS3Percentage} title="Upload to S3 progress" size={ProgressSize.sm} />
-                    </FlexItem>
-                </Flex>
-            </Modal>
-            <Modal
-                title={"Delete " + selectedFile.split('/').pop()}
+                title={"Delete file?"}
+                titleIconVariant="warning"
                 className="bucket-modal"
                 isOpen={isDeleteFileModalOpen}
                 onClose={handleDeleteFileModalToggle}
                 actions={[
                     <Button key="confirm" variant='danger' onClick={handleDeleteFileConfirm} isDisabled={!validateFileToDelete()}>
-                        Confirm deletion
+                        Delete file
                     </Button>,
-                    <Button key="cancel" variant="link" onClick={handleDeleteFileCancel}>
+                    <Button key="cancel" variant="secondary" onClick={handleDeleteFileCancel}>
                         Cancel
                     </Button>
                 ]}
             >
                 <TextContent>
-                    <Text component={TextVariants.small}>
-                        You are about to delete the file "{selectedFile.split('/').pop()}". Please enter the name of the file to confirm deletion.
+                    <Text component={TextVariants.p}>
+                        This action cannot be undone.
+                    </Text>
+                    <Text component={TextVariants.p}>
+                        Type <strong>{selectedFile.split('/').pop()}</strong> to confirm deletion.
                     </Text>
                 </TextContent>
-                <Form>
-                    <FormGroup
-                        label="Bucket name"
-                        isRequired
-                        fieldId="bucket-name"
-                    >
-                        <TextInput
-                            isRequired
-                            type="text"
-                            id="bucket-name"
-                            name="bucket-name"
-                            aria-describedby="bucket-name-helper"
-                            value={fileToDelete}
-                            onChange={(_event, fileToDelete) => setFileToDelete(fileToDelete)}
-                        />
-                    </FormGroup>
-                </Form>
+                <TextInput
+                    id="delete-modal-input"
+                    aria-label="Delete modal input"
+                    value={fileToDelete}
+                    onChange={(_event, fileToDelete) => setFileToDelete(fileToDelete)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' && validateFileToDelete()) {
+                            handleDeleteFileConfirm();
+                        }
+                    }}
+                />
             </Modal>
             <Modal
-                title="Create a new bucket"
+                title="Create a new folder"
                 className="bucket-modal"
                 isOpen={isCreateFolderModalOpen}
                 onClose={handleCreateFolderModalToggle}
@@ -829,12 +973,96 @@ const ObjectBrowser: React.FC<ObjectBrowserProps> = () => {
                             id="model-name"
                             name="model-name"
                             aria-describedby="model-name-helper"
-                            placeholder='Enter at least 1 character'
+                            placeholder='ibm-granite/granite-3b-code-instruct'
                             value={modelName}
                             onChange={(_event, modelName) => setModelName(modelName)}
                         />
                     </FormGroup>
                 </Form>
+                <Flex direction={{ default: 'column' }} className='upload-bars'>
+                    {modelFiles.map((file) => (
+                        <FlexItem key={file}>
+                            <Progress
+                                value={uploadToS3Percentages[file]?.loaded ?? 0}
+                                title={file + ' - ' + uploadToS3Percentages[file]?.status ?? ''}
+                                measureLocation='outside'
+                                variant={uploadToS3Percentages[file]?.status === 'completed' ? 'success' : undefined}
+                                size={ProgressSize.sm} />
+                        </FlexItem>
+                    ))}
+                </Flex>
+            </Modal>
+            <Modal
+                title={"Upload file"}
+                className="bucket-modal"
+                isOpen={isUploadSingleFileModalOpen}
+                onClose={handleUploadSingleFileModalToggle}
+                actions={[
+                    <Button key="confirm" variant="primary" onClick={handleUploadFileConfirm} isDisabled={singleFilename === ""}>
+                        Upload
+                    </Button>,
+                    <Button key="cancel" variant="link" onClick={handleUploadFileCancel}>
+                        Cancel
+                    </Button>
+                ]}
+            >
+                <FileUpload
+                    id="simple-file"
+                    value={singleFileUploadValue}
+                    filename={singleFilename}
+                    filenamePlaceholder="Drag and drop a file or upload one"
+                    onFileInputChange={handleFileInputChange}
+                    onClearClick={handleClear}
+                    browseButtonText="Browse"
+                />
+                <Flex direction={{ default: 'column' }} className='upload-bars'>
+                    <FlexItem hidden={!(uploadPercentages[singleFilename] && uploadPercentages[singleFilename].loaded !== 0)}>
+                        <Progress value={uploadPercentages[singleFilename]?.loaded ?? 0} title="Upload to backend progress" size={ProgressSize.sm} />
+                    </FlexItem>
+                    <FlexItem hidden={!(uploadToS3Percentages[singleFilename] && uploadToS3Percentages[singleFilename].loaded !== 0)}>
+                        <Progress value={uploadToS3Percentages[singleFilename]?.loaded ?? 0} title="Upload to S3 progress" size={ProgressSize.sm} />
+                    </FlexItem>
+                </Flex>
+            </Modal>
+            <Modal
+                title="Upload multiple files"
+                className="bucket-modal"
+                isOpen={isUploadFilesModalOpen}
+                actions={[
+                    <Button key="close" variant="primary" onClick={handleUploadFilesClose}>
+                        Close
+                    </Button>
+                ]}
+            >
+                <MultipleFileUpload
+                    onFileDrop={handleFileDrop}
+                    isHorizontal={false}
+                >
+                    <MultipleFileUploadMain
+                        titleIcon={<UploadIcon />}
+                        titleText="Drag and drop files here or click on the button to select files and folders."
+                    />
+                    {showStatus && (
+                        <MultipleFileUploadStatus
+                            statusToggleText={`${successfullyUploadedFileCount} of ${currentFiles.length} files uploaded`}
+                            statusToggleIcon={statusIcon}
+                            aria-label="Current uploads"
+                        >
+                            {currentFiles.map((file) => (
+                                <MultipleFileUploadStatusItem
+                                    file={file}
+                                    key={file.path}
+                                    fileName={file.path + ' - ' + uploadToS3Percentages[decodedPrefix + file.path.replace(/^\//, '')]?.status ?? ''}
+                                    onClearClick={() => removeFiles([file.path])}
+                                    progressHelperText={createHelperText(file)}
+                                    customFileHandler={() => { ; }}
+                                    progressValue={uploadToS3Percentages[decodedPrefix + file.path.replace(/^\//, '')]?.loaded ?? 0}
+                                    progressVariant={uploadToS3Percentages[decodedPrefix + file.path.replace(/^\//, '')]?.status === 'completed' ? 'success' : undefined}
+                                />
+                            ))}
+                        </MultipleFileUploadStatus>
+                    )}
+                </MultipleFileUpload>
             </Modal>
         </Page>
     );

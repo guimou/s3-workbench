@@ -165,7 +165,11 @@ const Buckets: React.FunctionComponent = () => {
     const [selectedBucket, setSelectedBucket] = React.useState('');
     const [bucketToDelete, setBucketToDelete] = React.useState('');
 
-    const handleButtonDeleteBucket = (name: string) => (event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleDeleteBucketModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
+        setIsDeleteBucketModalOpen(!isDeleteBucketModalOpen);
+    };
+
+    const handleDeleteBucketClick = (name: string) => (event: React.MouseEvent<HTMLButtonElement>) => {
         setSelectedBucket(name);
         handleDeleteBucketModalToggle(event);
     };
@@ -178,13 +182,9 @@ const Buckets: React.FunctionComponent = () => {
         }
     }
 
-    const handleDeleteBucketModalToggle = (_event: KeyboardEvent | React.MouseEvent) => {
-        setIsDeleteBucketModalOpen(!isDeleteBucketModalOpen);
-    };
-
     const handleDeleteBucketConfirm = () => {
         if (!validateBucketToDelete()) {
-            alert('Invalid bucket to delete');
+            console.log('Invalid bucket to delete');
             return;
         } else {
             axios.delete(`${config.backend_api_url}/buckets/${selectedBucket}`)
@@ -199,6 +199,7 @@ const Buckets: React.FunctionComponent = () => {
                             );
                             setBucketsList(newBucketsState);
                             setBucketToDelete('');
+                            setIsDeleteBucketModalOpen(false);
                         })
                         .catch(error => {
                             console.error(error);
@@ -208,7 +209,6 @@ const Buckets: React.FunctionComponent = () => {
                     console.error(error);
                 });
         }
-        setIsDeleteBucketModalOpen(false);
     }
 
     const handleDeleteBucketCancel = () => {
@@ -353,7 +353,7 @@ const Buckets: React.FunctionComponent = () => {
                                     <Td className='bucket-column'>{row.creation_date}</Td>
                                     <Td className='bucket-column'>{row.owner}</Td>
                                     <Td className='bucket-column align-right'>
-                                        <Button variant="danger" onClick={handleButtonDeleteBucket(row.name)}>
+                                        <Button variant="danger" onClick={handleDeleteBucketClick(row.name)}>
                                             <FontAwesomeIcon icon={faTrash} />
                                         </Button>
                                     </Td>
@@ -412,45 +412,43 @@ const Buckets: React.FunctionComponent = () => {
                 </TextContent>
             </Modal>
             <Modal
-                title={"Delete " + selectedBucket}
+                title={"Delete bucket?"}
+                titleIconVariant="warning"
                 className="bucket-modal"
                 isOpen={isDeleteBucketModalOpen}
                 onClose={handleDeleteBucketModalToggle}
                 actions={[
                     <Button key="confirm" variant="danger" onClick={handleDeleteBucketConfirm} isDisabled={!validateBucketToDelete()}>
-                        Confirm deletion
+                        Delete bucket
                     </Button>,
-                    <Button key="cancel" variant="link" onClick={handleDeleteBucketCancel}>
+                    <Button key="cancel" variant="secondary" onClick={handleDeleteBucketCancel}>
                         Cancel
                     </Button>
                 ]}
             >
                 <TextContent>
-                    <Text component={TextVariants.small}>
-                        You are about to delete the bucket "{selectedBucket}". Please enter the name of the bucket to confirm deletion.
+                    <Text component={TextVariants.p}>
+                        This action cannot be undone.
+                    </Text>
+                    <Text component={TextVariants.p}>
+                        Type <strong>{selectedBucket}</strong> to confirm deletion.
                     </Text>
                 </TextContent>
-                <Form>
-                    <FormGroup
-                        label="Bucket name"
-                        isRequired
-                        fieldId="bucket-name"
-                    >
-                        <TextInput
-                            isRequired
-                            type="text"
-                            id="bucket-name"
-                            name="bucket-name"
-                            aria-describedby="bucket-name-helper"
-                            value={bucketToDelete}
-                            onChange={(_event, bucketToDelete) => setBucketToDelete(bucketToDelete)}
-                        />
-                    </FormGroup>
-                </Form>
+                <TextInput
+                    id="delete-modal-input"
+                    aria-label="Delete modal input"
+                    value={bucketToDelete}
+                    onChange={(_event, bucketToDelete) => setBucketToDelete(bucketToDelete)}
+                    onKeyDown={(event) => {              
+                        if (event.key === 'Enter' && validateBucketToDelete()) {
+                            handleDeleteBucketConfirm();
+                        }
+                    }}
+                />
             </Modal>
         </Page>
 
     )
 };
 
-export default  Buckets;
+export default Buckets;
